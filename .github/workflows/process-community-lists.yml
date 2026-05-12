@@ -1,0 +1,71 @@
+name: Process Community Lists
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  process_list:
+    runs-on: ubuntu-latest
+    if: contains(github.event.issue.labels.*.name, 'community-list')
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Extract file from issue
+        id: extract
+        run: |
+          ISSUE_BODY="${{ github.event.issue.body }}"
+          
+          # استخراج اسم الملف الأصلي
+          ORIGINAL_NAME=$(echo "$ISSUE_BODY" | grep "اسم الملف الأصلي:" | sed 's/.*: //')
+          
+          # إذا كان فارغاً، استخدم timestamp
+          if [ -z "$ORIGINAL_NAME" ]; then
+            ORIGINAL_NAME="list_${{ github.event.issue.number }}.txt"
+          fi
+          
+          TIMESTAMP=$(date +%s)
+          FILE_NAME="${TIMESTAMP}_${ORIGINAL_NAME}"
+          
+          # استخراج المحتوى من بين الـ backticks
+          CONTENT=$(echo "$ISSUE_BODY" | sed -n '/^```$/,/^```$/p' | sed '1d;$d')
+          
+          # حفظ في ملف مؤقت
+          echo "$CONTENT" > "/tmp/${FILE_NAME}"
+          
+          echo "file_name=${FILE_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Create community-lists directory
+        run: mkdir -p community-lists
+
+      - name: Move file to community-lists
+        run: mv "/tmp/${{ steps.extract.outputs.file_name }}" "community-lists/${{ steps.extract.outputs.file_name }}"
+
+      - name: Commit and push
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "FB-Refiner Bot"
+          git add community-lists/
+          git commit -m "Add community list: ${{ steps.extract.outputs.file_name }}" || echo "Nothing to commit"
+          git push
+
+      - name: Close issue with success
+        uses: actions/github-script@v6
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '✅ **تمت المعالجة بنجاح!**\n\nتم إضافة القائمة إلى المستودع بنجاح! 🎉\n\nالملف متاح الآن في [community-lists](https://github.com/${{ github.repository }}/tree/main/community-lists)\n\nشكراً لمشاركتك! 👏'
+            });
+            
+            github.rest.issues.update({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'closed',
+              labels: ['community-list', 'completed']
+            });
